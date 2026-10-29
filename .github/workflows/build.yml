@@ -1,0 +1,1568 @@
+name: Build Yoto Remote
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Write Gradle files
+        run: |
+          mkdir -p app/src/main/java/com/timmytwoplates/yoto
+          mkdir -p app/src/main/res/layout app/src/main/res/drawable app/src/main/res/values app/src/main/res/xml
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "YotoRemote"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.timmytwoplates.yoto"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.timmytwoplates.yoto"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("com.squareup.okhttp3:okhttp:4.12.0")
+          }
+          EOF
+
+      - name: Write manifest and resources
+        run: |
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:label="@string/app_name"
+                  android:icon="@drawable/ic_app"
+                  android:allowBackup="false"
+                  android:theme="@android:style/Theme.DeviceDefault">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <activity
+                      android:name=".SleepActivity"
+                      android:exported="false"
+                      android:theme="@android:style/Theme.DeviceDefault.Dialog"
+                      android:taskAffinity=""
+                      android:excludeFromRecents="true" />
+                  <receiver android:name=".YotoWidget" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.appwidget.provider"
+                          android:resource="@xml/widget_info" />
+                  </receiver>
+                  <service
+                      android:name=".CoversService"
+                      android:permission="android.permission.BIND_REMOTEVIEWS"
+                      android:exported="false" />
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">Yoto Remote</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/xml/widget_info.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="250dp"
+              android:minHeight="180dp"
+              android:targetCellWidth="4"
+              android:targetCellHeight="3"
+              android:minResizeWidth="180dp"
+              android:minResizeHeight="110dp"
+              android:resizeMode="horizontal|vertical"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget"
+              android:widgetCategory="home_screen" />
+          EOF
+
+          cat > app/src/main/res/layout/widget.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="8dp"
+              android:background="@drawable/widget_bg">
+
+              <LinearLayout
+                  android:id="@+id/title_box"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:orientation="vertical"
+                  android:paddingLeft="4dp"
+                  android:paddingRight="4dp">
+                  <TextView
+                      android:id="@+id/title"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:textColor="#FFFFFF"
+                      android:textSize="14sp"
+                      android:textStyle="bold"
+                      android:maxLines="1"
+                      android:ellipsize="end" />
+                  <TextView
+                      android:id="@+id/subtitle"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:textColor="#B8B8C2"
+                      android:textSize="11sp"
+                      android:maxLines="1"
+                      android:ellipsize="end" />
+              </LinearLayout>
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="40dp"
+                  android:orientation="horizontal"
+                  android:gravity="center_vertical">
+                  <ImageButton
+                      android:id="@+id/btn_prev"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:padding="8dp"
+                      android:scaleType="centerInside"
+                      android:background="@drawable/btn_bg"
+                      android:contentDescription="Previous"
+                      android:src="@drawable/ic_prev" />
+                  <ImageButton
+                      android:id="@+id/btn_play"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:padding="8dp"
+                      android:scaleType="centerInside"
+                      android:background="@drawable/btn_bg"
+                      android:contentDescription="Play or pause"
+                      android:src="@drawable/ic_play" />
+                  <ImageButton
+                      android:id="@+id/btn_next"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:padding="8dp"
+                      android:scaleType="centerInside"
+                      android:background="@drawable/btn_bg"
+                      android:contentDescription="Next"
+                      android:src="@drawable/ic_next" />
+                  <ImageButton
+                      android:id="@+id/btn_vold"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:padding="8dp"
+                      android:scaleType="centerInside"
+                      android:background="@drawable/btn_bg"
+                      android:contentDescription="Volume down"
+                      android:src="@drawable/ic_vol_down" />
+                  <ImageButton
+                      android:id="@+id/btn_volu"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:padding="8dp"
+                      android:scaleType="centerInside"
+                      android:background="@drawable/btn_bg"
+                      android:contentDescription="Volume up"
+                      android:src="@drawable/ic_vol_up" />
+                  <ImageButton
+                      android:id="@+id/btn_sleep"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:padding="8dp"
+                      android:scaleType="centerInside"
+                      android:background="@drawable/btn_bg"
+                      android:contentDescription="Sleep timer"
+                      android:src="@drawable/ic_timer" />
+              </LinearLayout>
+
+              <FrameLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:layout_marginTop="4dp">
+                  <GridView
+                      android:id="@+id/grid"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent"
+                      android:numColumns="auto_fit"
+                      android:columnWidth="64dp"
+                      android:stretchMode="columnWidth"
+                      android:horizontalSpacing="4dp"
+                      android:verticalSpacing="4dp" />
+                  <TextView
+                      android:id="@+id/empty"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent"
+                      android:gravity="center"
+                      android:text="Tap here to open Yoto Remote, sign in and load your cards"
+                      android:textColor="#B8B8C2"
+                      android:textSize="12sp" />
+              </FrameLayout>
+          </LinearLayout>
+          EOF
+
+          cat > app/src/main/res/layout/cover_item.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/cell"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:padding="2dp">
+              <ImageView
+                  android:id="@+id/cover"
+                  android:layout_width="match_parent"
+                  android:layout_height="84dp"
+                  android:scaleType="centerCrop" />
+              <TextView
+                  android:id="@+id/label"
+                  android:layout_width="match_parent"
+                  android:layout_height="84dp"
+                  android:gravity="center"
+                  android:padding="3dp"
+                  android:maxLines="4"
+                  android:ellipsize="end"
+                  android:textColor="#FFFFFF"
+                  android:textSize="10sp" />
+          </FrameLayout>
+          EOF
+
+          cat > app/src/main/res/drawable/widget_bg.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#EE1A1A1E" />
+              <corners android:radius="20dp" />
+          </shape>
+          EOF
+
+          cat > app/src/main/res/drawable/cell_bg.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#2E2E36" />
+              <corners android:radius="6dp" />
+          </shape>
+          EOF
+
+          cat > app/src/main/res/drawable/btn_bg.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <selector xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:state_pressed="true">
+                  <shape android:shape="rectangle">
+                      <solid android:color="#44FFFFFF" />
+                      <corners android:radius="12dp" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="#00000000" />
+                      <corners android:radius="12dp" />
+                  </shape>
+              </item>
+          </selector>
+          EOF
+
+          mkicon() {
+            cat > "app/src/main/res/drawable/$1.xml" <<ICON
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path android:fillColor="#FFFFFF" android:pathData="$2" />
+          </vector>
+          ICON
+          }
+          mkicon ic_play "M8,5v14l11,-7z"
+          mkicon ic_pause "M6,19h4V5H6v14zm8,-14v14h4V5h-4z"
+          mkicon ic_next "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z"
+          mkicon ic_prev "M6,6h2v12H6zm3.5,6l8.5,6V6z"
+          mkicon ic_vol_down "M18.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v8.05c1.48,-0.73 2.5,-2.25 2.5,-4.02zM5,9v6h4l5,5V4L9,9H5z"
+          mkicon ic_vol_up "M3,9v6h4l5,5V4L7,9H3zm13.5,3c0,-1.77 -1.02,-3.29 -2.5,-4.03v8.05c1.48,-0.73 2.5,-2.25 2.5,-4.02zM14,3.23v2.06c2.89,0.86 5,3.54 5,6.71s-2.11,5.85 -5,6.71v2.06c4.01,-0.91 7,-4.49 7,-8.77s-2.99,-7.86 -7,-8.77z"
+          mkicon ic_timer "M12,2C6.5,2 2,6.5 2,12s4.5,10 10,10 10,-4.5 10,-10S17.5,2 12,2zM12.5,7H11v6l5.25,3.15 0.75,-1.23 -4.5,-2.67z"
+
+          cat > app/src/main/res/drawable/ic_app.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="48dp"
+              android:height="48dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path android:fillColor="#FFC107" android:pathData="M12,2a10,10 0 1,0 0,20a10,10 0 1,0 0,-20" />
+              <path android:fillColor="#202020" android:pathData="M10,8v8l6,-4z" />
+          </vector>
+          EOF
+
+      - name: Write Kotlin sources (utilities, auth, API)
+        run: |
+          D=app/src/main/java/com/timmytwoplates/yoto
+
+          cat > $D/Util.kt <<'EOF'
+          package com.timmytwoplates.yoto
+
+          import android.content.Context
+          import android.graphics.Bitmap
+          import android.graphics.BitmapFactory
+          import android.os.Handler
+          import android.os.Looper
+          import android.widget.Toast
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.io.File
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          fun JSONObject.str(k: String): String = if (isNull(k)) "" else optString(k)
+
+          fun findStr(o: JSONObject, key: String, depth: Int = 5): String {
+              if (!o.isNull(key)) {
+                  val v = o.opt(key)
+                  if (v is String && v.isNotEmpty()) return v
+              }
+              if (depth == 0) return ""
+              val it = o.keys()
+              while (it.hasNext()) {
+                  val v = o.opt(it.next())
+                  if (v is JSONObject) {
+                      val r = findStr(v, key, depth - 1)
+                      if (r.isNotEmpty()) return r
+                  }
+              }
+              return ""
+          }
+
+          fun toast(ctx: Context, msg: String) {
+              Handler(Looper.getMainLooper()).post {
+                  Toast.makeText(ctx.applicationContext, msg, Toast.LENGTH_SHORT).show()
+              }
+          }
+
+          object Store {
+              private fun p(ctx: Context) =
+                  ctx.applicationContext.getSharedPreferences("yoto", Context.MODE_PRIVATE)
+
+              fun str(ctx: Context, k: String): String? = p(ctx).getString(k, null)
+
+              fun put(ctx: Context, k: String, v: String?) {
+                  val e = p(ctx).edit()
+                  if (v == null) e.remove(k) else e.putString(k, v)
+                  e.apply()
+              }
+
+              fun long(ctx: Context, k: String, d: Long = 0L): Long = p(ctx).getLong(k, d)
+
+              fun putLong(ctx: Context, k: String, v: Long) {
+                  p(ctx).edit().putLong(k, v).apply()
+              }
+
+              fun int(ctx: Context, k: String, d: Int = 0): Int = p(ctx).getInt(k, d)
+
+              fun putInt(ctx: Context, k: String, v: Int) {
+                  p(ctx).edit().putInt(k, v).apply()
+              }
+
+              @Synchronized
+              fun log(ctx: Context, msg: String) {
+                  val t = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                  val old = str(ctx, "log")?.split("\n") ?: emptyList()
+                  val all = (old + "$t $msg").takeLast(25)
+                  put(ctx, "log", all.joinToString("\n"))
+              }
+          }
+
+          data class Card(val id: String, val title: String, val cover: String)
+
+          object Library {
+              fun load(ctx: Context): List<Card> {
+                  val s = Store.str(ctx, "lib") ?: return emptyList()
+                  return try {
+                      val a = JSONArray(s)
+                      (0 until a.length()).map {
+                          val o = a.getJSONObject(it)
+                          Card(o.str("id"), o.str("title"), o.str("cover"))
+                      }
+                  } catch (e: Exception) {
+                      emptyList()
+                  }
+              }
+
+              fun save(ctx: Context, cards: List<Card>) {
+                  val a = JSONArray()
+                  for (c in cards) {
+                      a.put(JSONObject().put("id", c.id).put("title", c.title).put("cover", c.cover))
+                  }
+                  Store.put(ctx, "lib", a.toString())
+                  Store.putLong(ctx, "libAt", System.currentTimeMillis())
+              }
+
+              fun title(ctx: Context, id: String): String =
+                  load(ctx).firstOrNull { it.id == id }?.title ?: ""
+
+              fun stale(ctx: Context): Boolean =
+                  System.currentTimeMillis() - Store.long(ctx, "libAt") > 3L * 3600 * 1000 ||
+                      load(ctx).isEmpty()
+          }
+
+          object Covers {
+              private val http = OkHttpClient()
+
+              fun file(ctx: Context, id: String): File {
+                  val dir = File(ctx.cacheDir, "covers")
+                  dir.mkdirs()
+                  return File(dir, id.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".jpg")
+              }
+
+              fun ensure(ctx: Context, c: Card) {
+                  val f = file(ctx, c.id)
+                  if (f.exists() || c.cover.isEmpty()) return
+                  try {
+                      val bytes = http.newCall(Request.Builder().url(c.cover).build()).execute().use {
+                          if (it.isSuccessful) it.body?.bytes() else null
+                      } ?: return
+                      val bounds = BitmapFactory.Options()
+                      bounds.inJustDecodeBounds = true
+                      BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                      var sample = 1
+                      while (bounds.outWidth / (sample * 2) >= 150) sample *= 2
+                      val opts = BitmapFactory.Options()
+                      opts.inSampleSize = sample
+                      val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return
+                      val h = (bmp.height * 150f / bmp.width).toInt().coerceAtLeast(1)
+                      val scaled = Bitmap.createScaledBitmap(bmp, 150, h, true)
+                      f.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+                  } catch (e: Exception) {
+                      // leave uncached; the grid shows the title instead
+                  }
+              }
+          }
+          EOF
+
+          cat > $D/Auth.kt <<'EOF'
+          package com.timmytwoplates.yoto
+
+          import android.content.Context
+          import android.util.Base64
+          import okhttp3.FormBody
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import org.json.JSONObject
+          import java.net.ServerSocket
+          import java.net.URLEncoder
+          import java.security.MessageDigest
+          import java.security.SecureRandom
+
+          object Auth {
+              const val CLIENT_ID = "tpc_qNTQxbkyfKzpuTcitzMshV"
+              const val REDIRECT = "http://127.0.0.1:8787/callback"
+              const val SCOPE =
+                  "family:devices:view family:devices:control family:library:view user:content:manage offline_access"
+
+              @Volatile
+              var listener: ServerSocket? = null
+
+              private val lock = Any()
+              private val http = OkHttpClient()
+
+              fun signedIn(ctx: Context): Boolean = Store.str(ctx, "refresh") != null
+
+              private fun b64(b: ByteArray): String =
+                  Base64.encodeToString(b, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+
+              fun newVerifier(): String {
+                  val b = ByteArray(48)
+                  SecureRandom().nextBytes(b)
+                  return b64(b)
+              }
+
+              fun challenge(verifier: String): String =
+                  b64(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)))
+
+              fun authUrl(challenge: String, state: String): String {
+                  val params = listOf(
+                      "audience" to "https://api.yotoplay.com",
+                      "scope" to SCOPE,
+                      "response_type" to "code",
+                      "client_id" to CLIENT_ID,
+                      "code_challenge" to challenge,
+                      "code_challenge_method" to "S256",
+                      "redirect_uri" to REDIRECT,
+                      "state" to state
+                  )
+                  return "https://login.yotoplay.com/authorize?" +
+                      params.joinToString("&") { it.first + "=" + URLEncoder.encode(it.second, "UTF-8") }
+              }
+
+              // Returns an error message, or null on success.
+              fun exchange(ctx: Context, code: String, verifier: String): String? {
+                  val body = FormBody.Builder()
+                      .add("grant_type", "authorization_code")
+                      .add("client_id", CLIENT_ID)
+                      .add("code_verifier", verifier)
+                      .add("code", code)
+                      .add("redirect_uri", REDIRECT)
+                      .build()
+                  return post(ctx, body, null)
+              }
+
+              private fun post(ctx: Context, body: FormBody, oldRefresh: String?): String? {
+                  return try {
+                      val req = Request.Builder()
+                          .url("https://login.yotoplay.com/oauth/token")
+                          .post(body)
+                          .build()
+                      http.newCall(req).execute().use { r ->
+                          val s = r.body?.string() ?: ""
+                          if (!r.isSuccessful) {
+                              "Token error ${r.code}: ${s.take(160)}"
+                          } else {
+                              val j = JSONObject(s)
+                              Store.put(ctx, "access", j.getString("access_token"))
+                              val nr = j.str("refresh_token").ifEmpty { oldRefresh.orEmpty() }
+                              if (nr.isNotEmpty()) Store.put(ctx, "refresh", nr)
+                              Store.putLong(
+                                  ctx, "exp",
+                                  System.currentTimeMillis() + j.optLong("expires_in", 3600L) * 1000L
+                              )
+                              null
+                          }
+                      }
+                  } catch (e: Exception) {
+                      "Token error: ${e.message}"
+                  }
+              }
+
+              // Refresh tokens are single use, so everything goes through one lock.
+              fun accessToken(ctx: Context): String? {
+                  synchronized(lock) {
+                      val at = Store.str(ctx, "access")
+                      if (at != null && System.currentTimeMillis() < Store.long(ctx, "exp") - 60_000L) return at
+                      val rt = Store.str(ctx, "refresh") ?: return null
+                      val body = FormBody.Builder()
+                          .add("grant_type", "refresh_token")
+                          .add("client_id", CLIENT_ID)
+                          .add("refresh_token", rt)
+                          .build()
+                      val err = post(ctx, body, rt)
+                      if (err != null) {
+                          Store.put(ctx, "lastErr", err)
+                          Store.log(ctx, err)
+                          return null
+                      }
+                      return Store.str(ctx, "access")
+                  }
+              }
+          }
+          EOF
+
+          cat > $D/YotoApi.kt <<'EOF'
+          package com.timmytwoplates.yoto
+
+          import android.content.Context
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import org.json.JSONTokener
+
+          object YotoApi {
+              private const val BASE = "https://api.yotoplay.com"
+              private val http = OkHttpClient()
+
+              fun get(ctx: Context, path: String): String? {
+                  val tok = Auth.accessToken(ctx)
+                  if (tok == null) {
+                      Store.log(ctx, "GET $path: no token")
+                      return null
+                  }
+                  val req = Request.Builder()
+                      .url(BASE + path)
+                      .header("Authorization", "Bearer $tok")
+                      .build()
+                  return try {
+                      http.newCall(req).execute().use { r ->
+                          val s = r.body?.string() ?: ""
+                          if (r.isSuccessful) {
+                              s
+                          } else {
+                              Store.log(ctx, "GET $path -> ${r.code}")
+                              null
+                          }
+                      }
+                  } catch (e: Exception) {
+                      Store.log(ctx, "GET $path failed: ${e.message}")
+                      null
+                  }
+              }
+
+              // (deviceId, name)
+              fun devices(ctx: Context): List<Pair<String, String>> {
+                  val s = get(ctx, "/device-v2/devices/mine") ?: return emptyList()
+                  return try {
+                      val a = JSONObject(s).optJSONArray("devices") ?: return emptyList()
+                      (0 until a.length()).map {
+                          val o = a.getJSONObject(it)
+                          o.str("deviceId") to o.str("name").ifEmpty { "Yoto player" }
+                      }
+                  } catch (e: Exception) {
+                      Store.log(ctx, "devices parse: ${e.message}")
+                      emptyList()
+                  }
+              }
+
+              // The inner card object (has content.chapters[].tracks[]).
+              fun content(ctx: Context, cardId: String): JSONObject? {
+                  val s = get(ctx, "/content/$cardId") ?: return null
+                  return try {
+                      val root = JSONObject(s)
+                      root.optJSONObject("card") ?: root
+                  } catch (e: Exception) {
+                      null
+                  }
+              }
+
+              private fun firstArray(o: JSONObject): JSONArray? {
+                  val keys = o.keys()
+                  while (keys.hasNext()) {
+                      val v = o.opt(keys.next())
+                      if (v is JSONArray) return v
+                  }
+                  val keys2 = o.keys()
+                  while (keys2.hasNext()) {
+                      val v = o.opt(keys2.next())
+                      if (v is JSONObject) {
+                          val r = firstArray(v)
+                          if (r != null) return r
+                      }
+                  }
+                  return null
+              }
+
+              // Merges your MYO cards (documented) with the family library (not in the public docs,
+              // parsed loosely and ignored if it fails). Returns the number of cards.
+              fun library(ctx: Context): Int {
+                  val map = LinkedHashMap<String, Card>()
+
+                  get(ctx, "/content/mine")?.let { s ->
+                      try {
+                          val a = JSONObject(s).optJSONArray("cards")
+                          if (a != null) {
+                              for (i in 0 until a.length()) {
+                                  val o = a.getJSONObject(i)
+                                  val id = o.str("cardId")
+                                  if (id.isEmpty()) continue
+                                  map[id] = Card(id, o.str("title"), findStr(o, "imageL"))
+                              }
+                          }
+                      } catch (e: Exception) {
+                          Store.log(ctx, "mine parse: ${e.message}")
+                      }
+                  }
+
+                  get(ctx, "/card/family/library")?.let { s ->
+                      try {
+                          val root = JSONTokener(s).nextValue()
+                          val arr: JSONArray? = when (root) {
+                              is JSONArray -> root
+                              is JSONObject -> root.optJSONArray("cards")
+                                  ?: root.optJSONArray("library")
+                                  ?: firstArray(root)
+                              else -> null
+                          }
+                          if (arr != null) {
+                              for (i in 0 until arr.length()) {
+                                  val o = arr.optJSONObject(i) ?: continue
+                                  var id = o.str("cardId")
+                                  if (id.isEmpty()) id = o.str("id")
+                                  if (id.isEmpty()) id = findStr(o, "cardId")
+                                  if (id.isEmpty() || map.containsKey(id)) continue
+                                  map[id] = Card(id, findStr(o, "title"), findStr(o, "imageL"))
+                              }
+                          }
+                      } catch (e: Exception) {
+                          Store.log(ctx, "family library parse: ${e.message}")
+                      }
+                  }
+
+                  if (map.isNotEmpty()) Library.save(ctx, map.values.toList())
+                  Store.log(ctx, "Library: ${map.size} cards")
+                  return map.size
+              }
+          }
+          EOF
+
+      - name: Write Kotlin sources (MQTT and player control)
+        run: |
+          D=app/src/main/java/com/timmytwoplates/yoto
+
+          cat > $D/Mqtt.kt <<'EOF'
+          package com.timmytwoplates.yoto
+
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import okhttp3.Response
+          import okhttp3.WebSocket
+          import okhttp3.WebSocketListener
+          import okio.ByteString
+          import okio.ByteString.Companion.toByteString
+          import org.json.JSONObject
+          import java.io.ByteArrayOutputStream
+          import java.util.concurrent.CountDownLatch
+          import java.util.concurrent.LinkedBlockingQueue
+          import java.util.concurrent.TimeUnit
+
+          // Minimal MQTT 3.1.1 client over an OkHttp WebSocket. QoS 0 only, one short-lived session.
+          class Mqtt(private val deviceId: String, private val token: String) {
+              private val client = OkHttpClient.Builder().build()
+              private var ws: WebSocket? = null
+              private var acc = ByteArray(0)
+              private val connackLatch = CountDownLatch(1)
+              private val subackLatch = CountDownLatch(1)
+
+              @Volatile
+              private var rc = -1
+
+              @Volatile
+              var error: String? = null
+
+              val inbox = LinkedBlockingQueue<Pair<String, JSONObject>>()
+
+              private fun utf(s: String): ByteArray {
+                  val b = s.toByteArray(Charsets.UTF_8)
+                  return byteArrayOf((b.size shr 8).toByte(), (b.size and 0xFF).toByte()) + b
+              }
+
+              private fun remLen(n: Int): ByteArray {
+                  val o = ByteArrayOutputStream()
+                  var x = n
+                  do {
+                      var d = x % 128
+                      x /= 128
+                      if (x > 0) d = d or 0x80
+                      o.write(d)
+                  } while (x > 0)
+                  return o.toByteArray()
+              }
+
+              private fun packet(first: Int, body: ByteArray): ByteArray =
+                  byteArrayOf(first.toByte()) + remLen(body.size) + body
+
+              private fun connectPacket(): ByteArray {
+                  val body = utf("MQTT") +
+                      byteArrayOf(4, 0xC2.toByte(), 0x01, 0x2C) +
+                      utf("DASH" + deviceId) +
+                      utf(deviceId + "?x-amz-customauthorizer-name=PublicJWTAuthorizer") +
+                      utf(token)
+                  return packet(0x10, body)
+              }
+
+              fun connect(timeoutMs: Long): Boolean {
+                  val req = Request.Builder()
+                      .url("wss://aqrphjqbp3u2z-ats.iot.eu-west-2.amazonaws.com/mqtt")
+                      .header("Sec-WebSocket-Protocol", "mqtt")
+                      .build()
+                  ws = client.newWebSocket(req, object : WebSocketListener() {
+                      override fun onOpen(webSocket: WebSocket, response: Response) {
+                          webSocket.send(connectPacket().toByteString())
+                      }
+
+                      override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                          feed(bytes.toByteArray())
+                      }
+
+                      override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                          webSocket.close(1000, null)
+                      }
+
+                      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                          connackLatch.countDown()
+                          subackLatch.countDown()
+                      }
+
+                      override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                          val http = if (response != null) " (HTTP " + response.code + ")" else ""
+                          error = (t.message ?: t.javaClass.simpleName) + http
+                          connackLatch.countDown()
+                          subackLatch.countDown()
+                      }
+                  })
+                  connackLatch.await(timeoutMs, TimeUnit.MILLISECONDS)
+                  return rc == 0
+              }
+
+              fun subscribe(topics: List<String>, timeoutMs: Long): Boolean {
+                  var body = byteArrayOf(0, 1)
+                  for (t in topics) body += utf(t) + byteArrayOf(0)
+                  ws?.send(packet(0x82, body).toByteString())
+                  return subackLatch.await(timeoutMs, TimeUnit.MILLISECONDS)
+              }
+
+              fun publish(topic: String, payload: String) {
+                  ws?.send(packet(0x30, utf(topic) + payload.toByteArray(Charsets.UTF_8)).toByteString())
+              }
+
+              fun close() {
+                  try {
+                      ws?.send(byteArrayOf(0xE0.toByte(), 0).toByteString())
+                      ws?.close(1000, null)
+                  } catch (e: Exception) {
+                  }
+                  client.dispatcher.executorService.shutdown()
+                  client.connectionPool.evictAll()
+              }
+
+              @Synchronized
+              private fun feed(b: ByteArray) {
+                  acc += b
+                  while (true) {
+                      if (acc.size < 2) return
+                      var mult = 1
+                      var len = 0
+                      var i = 1
+                      var ok = false
+                      while (i < acc.size && i <= 4) {
+                          val d = acc[i].toInt() and 0xFF
+                          len += (d and 0x7F) * mult
+                          mult *= 128
+                          i++
+                          if (d and 0x80 == 0) {
+                              ok = true
+                              break
+                          }
+                      }
+                      if (!ok) return
+                      val total = i + len
+                      if (acc.size < total) return
+                      val first = acc[0].toInt() and 0xFF
+                      val body = acc.copyOfRange(i, total)
+                      acc = acc.copyOfRange(total, acc.size)
+                      handle(first shr 4, first and 0x0F, body)
+                  }
+              }
+
+              private fun handle(type: Int, flags: Int, body: ByteArray) {
+                  when (type) {
+                      2 -> {
+                          rc = if (body.size >= 2) body[1].toInt() else -2
+                          if (rc != 0) error = "CONNACK code $rc"
+                          connackLatch.countDown()
+                      }
+                      9 -> subackLatch.countDown()
+                      3 -> {
+                          val tl = ((body[0].toInt() and 0xFF) shl 8) or (body[1].toInt() and 0xFF)
+                          val topic = String(body, 2, tl, Charsets.UTF_8)
+                          var pos = 2 + tl
+                          val qos = (flags shr 1) and 3
+                          if (qos > 0) {
+                              if (qos == 1) {
+                                  ws?.send(byteArrayOf(0x40, 2, body[pos], body[pos + 1]).toByteString())
+                              }
+                              pos += 2
+                          }
+                          val payload = String(body, pos, body.size - pos, Charsets.UTF_8)
+                          val j = try {
+                              JSONObject(payload)
+                          } catch (e: Exception) {
+                              JSONObject()
+                          }
+                          inbox.put(Pair(topic, j))
+                      }
+                  }
+              }
+          }
+          EOF
+
+          cat > $D/Player.kt <<'EOF'
+          package com.timmytwoplates.yoto
+
+          import android.content.Context
+          import org.json.JSONObject
+          import java.util.concurrent.TimeUnit
+
+          class Session(val deviceId: String, val m: Mqtt) {
+              fun cmd(path: String, body: String = "{}") {
+                  m.publish("device/$deviceId/command/$path", body)
+              }
+
+              fun events(timeoutMs: Long = 2500): JSONObject? {
+                  m.inbox.clear()
+                  cmd("events/request")
+                  val end = System.currentTimeMillis() + timeoutMs
+                  while (true) {
+                      val left = end - System.currentTimeMillis()
+                      if (left <= 0) return null
+                      val p = m.inbox.poll(left, TimeUnit.MILLISECONDS) ?: return null
+                      if (p.first.endsWith("/data/events")) return p.second
+                  }
+              }
+
+              // Waits for the OK/FAIL ack of a command, e.g. key "card", "volume", "sleep-timer".
+              fun response(key: String, timeoutMs: Long): String? {
+                  val end = System.currentTimeMillis() + timeoutMs
+                  while (true) {
+                      val left = end - System.currentTimeMillis()
+                      if (left <= 0) return null
+                      val p = m.inbox.poll(left, TimeUnit.MILLISECONDS) ?: return null
+                      if (p.first.endsWith("/response")) {
+                          val st = p.second.optJSONObject("status")
+                          if (st != null && st.has(key)) return st.optString(key)
+                      }
+                  }
+              }
+          }
+
+          object Player {
+              private val lock = Any()
+
+              // The card URI format is not spelled out in the public docs, so a few are tried and the
+              // one the player acknowledges with OK is remembered.
+              private val URI_FORMATS = listOf("https://yoto.com/%s", "yoto://card/%s")
+
+              private fun open(ctx: Context): Session? {
+                  val tok = Auth.accessToken(ctx)
+                  if (tok == null) {
+                      Store.put(ctx, "lastErr", "Sign in from the app first")
+                      return null
+                  }
+                  var dev = Store.str(ctx, "deviceId")
+                  if (dev == null) {
+                      val d = YotoApi.devices(ctx).firstOrNull()
+                      if (d != null) {
+                          dev = d.first
+                          Store.put(ctx, "deviceId", d.first)
+                          Store.put(ctx, "deviceName", d.second)
+                      }
+                  }
+                  if (dev == null) {
+                      Store.put(ctx, "lastErr", "No player found on this account")
+                      return null
+                  }
+                  val m = Mqtt(dev, tok)
+                  if (!m.connect(5000)) {
+                      val e = "MQTT connect failed: " + (m.error ?: "no CONNACK")
+                      Store.put(ctx, "lastErr", e)
+                      Store.log(ctx, e)
+                      m.close()
+                      return null
+                  }
+                  m.subscribe(
+                      listOf("device/$dev/data/events", "device/$dev/data/status", "device/$dev/response"),
+                      3000
+                  )
+                  return Session(dev, m)
+              }
+
+              private fun startCard(ctx: Context, s: Session, cardId: String, ck: String?, tk: String?): Boolean {
+                  val first = Store.int(ctx, "uriFmt", 0)
+                  for (k in URI_FORMATS.indices) {
+                      val i = (first + k) % URI_FORMATS.size
+                      val o = JSONObject().put("uri", URI_FORMATS[i].format(cardId))
+                      if (ck != null) o.put("chapterKey", ck)
+                      if (tk != null) o.put("trackKey", tk)
+                      o.put("secondsIn", 0)
+                      s.m.inbox.clear()
+                      s.cmd("card/start", o.toString())
+                      val r = s.response("card", 3000)
+                      Store.log(ctx, "card/start fmt$i -> " + (r ?: "no ack"))
+                      if (r == "OK") {
+                          Store.putInt(ctx, "uriFmt", i)
+                          return true
+                      }
+                      if (r == null) return true
+                  }
+                  return false
+              }
+
+              private fun skip(ctx: Context, s: Session, dir: Int): String {
+                  val e = s.events() ?: return "Player not responding"
+                  val cardId = e.str("cardId")
+                  if (cardId.isEmpty()) return "Nothing playing"
+                  val ck = e.str("chapterKey")
+                  val tk = e.str("trackKey")
+                  val pos = e.optInt("position", 0)
+                  val c = YotoApi.content(ctx, cardId) ?: return "Couldn't read card contents"
+                  val chs = c.optJSONObject("content")?.optJSONArray("chapters") ?: return "Card has no chapters"
+                  val flat = ArrayList<Pair<String, String>>()
+                  for (i in 0 until chs.length()) {
+                      val ch = chs.getJSONObject(i)
+                      val trs = ch.optJSONArray("tracks") ?: continue
+                      for (j in 0 until trs.length()) {
+                          flat.add(Pair(ch.str("key"), trs.getJSONObject(j).str("key")))
+                      }
+                  }
+                  val idx = flat.indexOfFirst { it.first == ck && it.second == tk }
+                  if (idx < 0) return "Current track not found in card"
+                  val target = if (dir < 0) {
+                      if (pos > 3) idx else maxOf(0, idx - 1)
+                  } else {
+                      idx + 1
+                  }
+                  if (target >= flat.size) return "Last track"
+                  return if (startCard(ctx, s, cardId, flat[target].first, flat[target].second)) "" else "Couldn't change track"
+              }
+
+              // Returns "" on success, otherwise a short message to toast.
+              fun perform(ctx0: Context, action: String, arg: String?): String {
+                  val ctx = ctx0.applicationContext
+                  synchronized(lock) {
+                      Store.put(ctx, "lastErr", null)
+                      val s = try {
+                          open(ctx)
+                      } catch (e: Exception) {
+                          Store.put(ctx, "lastErr", "Error: " + e.message)
+                          null
+                      }
+                      if (s == null) {
+                          YotoWidget.refreshAll(ctx)
+                          return Store.str(ctx, "lastErr") ?: "Not connected"
+                      }
+                      var msg = ""
+                      try {
+                          when (action) {
+                              "toggle" -> {
+                                  val e = s.events()
+                                  val playing = e?.str("playbackStatus") == "playing"
+                                  s.m.inbox.clear()
+                                  s.cmd(if (playing) "card/pause" else "card/resume")
+                                  s.response("card", 2000)
+                              }
+                              "volup", "voldown" -> {
+                                  val e = s.events()
+                                  val cur = e?.optInt("volume", -1) ?: -1
+                                  if (cur < 0) {
+                                      msg = "Volume unknown"
+                                  } else {
+                                      val v = (cur + (if (action == "volup") 6 else -6)).coerceIn(0, 100)
+                                      s.m.inbox.clear()
+                                      s.cmd("volume/set", "{\"volume\":" + v + "}")
+                                      s.response("volume", 2000)
+                                  }
+                              }
+                              "sleep" -> {
+                                  val sec = arg?.toIntOrNull() ?: 0
+                                  s.m.inbox.clear()
+                                  s.cmd("sleep-timer/set", "{\"seconds\":" + sec + "}")
+                                  s.response("sleep-timer", 2000)
+                              }
+                              "play" -> {
+                                  if (arg == null || !startCard(ctx, s, arg, null, null)) msg = "Couldn't start card"
+                              }
+                              "next" -> msg = skip(ctx, s, 1)
+                              "prev" -> msg = skip(ctx, s, -1)
+                              "refresh" -> {
+                                  if (Library.stale(ctx)) YotoApi.library(ctx)
+                              }
+                          }
+                          if (action != "refresh") Thread.sleep(600)
+                          val e2 = s.events()
+                          if (e2 != null && e2.length() > 0) {
+                              Store.put(ctx, "np", e2.toString())
+                              Store.put(ctx, "stale", "0")
+                          } else {
+                              Store.put(ctx, "stale", "1")
+                          }
+                      } catch (e: Exception) {
+                          Store.log(ctx, action + " error: " + e.message)
+                          msg = "Error: " + e.message
+                      } finally {
+                          s.m.close()
+                          YotoWidget.refreshAll(ctx)
+                      }
+                      return msg
+                  }
+              }
+          }
+          EOF
+
+      - name: Write Kotlin sources (widget and activities)
+        run: |
+          D=app/src/main/java/com/timmytwoplates/yoto
+
+          cat > $D/YotoWidget.kt <<'EOF'
+          package com.timmytwoplates.yoto
+
+          import android.app.PendingIntent
+          import android.appwidget.AppWidgetManager
+          import android.appwidget.AppWidgetProvider
+          import android.content.ComponentName
+          import android.content.Context
+          import android.content.Intent
+          import android.net.Uri
+          import android.view.View
+          import android.widget.RemoteViews
+          import android.widget.RemoteViewsService
+          import android.graphics.BitmapFactory
+          import org.json.JSONObject
+
+          class YotoWidget : AppWidgetProvider() {
+
+              companion object {
+                  const val ACTION_CMD = "com.timmytwoplates.yoto.CMD"
+                  const val ACTION_PLAY = "com.timmytwoplates.yoto.PLAY"
+
+                  fun refreshAll(ctx: Context) {
+                      val mgr = AppWidgetManager.getInstance(ctx)
+                      val ids = mgr.getAppWidgetIds(ComponentName(ctx, YotoWidget::class.java))
+                      for (id in ids) render(ctx, mgr, id)
+                  }
+
+                  private fun cmdPi(ctx: Context, a: String): PendingIntent {
+                      val i = Intent(ctx, YotoWidget::class.java).setAction(ACTION_CMD).putExtra("a", a)
+                      return PendingIntent.getBroadcast(
+                          ctx, a.hashCode(), i,
+                          PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                      )
+                  }
+
+                  fun render(ctx: Context, mgr: AppWidgetManager, id: Int) {
+                      val rv = RemoteViews(ctx.packageName, R.layout.widget)
+                      val np: JSONObject? = try {
+                          Store.str(ctx, "np")?.let { JSONObject(it) }
+                      } catch (e: Exception) {
+                          null
+                      }
+                      val signed = Auth.signedIn(ctx)
+                      val playing = np?.str("playbackStatus") == "playing"
+                      val track = np?.str("trackTitle").orEmpty()
+
+                      val line1 = when {
+                          !signed -> "Open Yoto Remote to sign in"
+                          track.isNotEmpty() -> track
+                          else -> "Nothing playing"
+                      }
+                      val parts = ArrayList<String>()
+                      if (np != null) {
+                          val ct = Library.title(ctx, np.str("cardId"))
+                          if (ct.isNotEmpty()) parts.add(ct)
+                          if (np.has("volume")) parts.add("vol " + np.optInt("volume") + "%")
+                          if (np.optBoolean("sleepTimerActive", false)) parts.add("sleep timer on")
+                      }
+                      if (signed && Store.str(ctx, "stale") == "1") parts.add("player not responding")
+
+                      rv.setTextViewText(R.id.title, line1)
+                      rv.setTextViewText(R.id.subtitle, parts.joinToString(" · "))
+                      rv.setImageViewResource(R.id.btn_play, if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+
+                      rv.setOnClickPendingIntent(R.id.title_box, cmdPi(ctx, "refresh"))
+                      rv.setOnClickPendingIntent(R.id.btn_prev, cmdPi(ctx, "prev"))
+                      rv.setOnClickPendingIntent(R.id.btn_play, cmdPi(ctx, "toggle"))
+                      rv.setOnClickPendingIntent(R.id.btn_next, cmdPi(ctx, "next"))
+                      rv.setOnClickPendingIntent(R.id.btn_vold, cmdPi(ctx, "voldown"))
+                      rv.setOnClickPendingIntent(R.id.btn_volu, cmdPi(ctx, "volup"))
+
+                      val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                      val sleepIntent = Intent(ctx, SleepActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                      rv.setOnClickPendingIntent(R.id.btn_sleep, PendingIntent.getActivity(ctx, 77, sleepIntent, flags))
+                      val mainIntent = Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                      rv.setOnClickPendingIntent(R.id.empty, PendingIntent.getActivity(ctx, 78, mainIntent, flags))
+
+                      val svc = Intent(ctx, CoversService::class.java)
+                          .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                      svc.data = Uri.parse(svc.toUri(Intent.URI_INTENT_SCHEME))
+                      rv.setRemoteAdapter(R.id.grid, svc)
+                      rv.setEmptyView(R.id.grid, R.id.empty)
+                      val tpl = Intent(ctx, YotoWidget::class.java).setAction(ACTION_PLAY)
+                      rv.setPendingIntentTemplate(
+                          R.id.grid,
+                          PendingIntent.getBroadcast(
+                              ctx, 20, tpl,
+                              PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                          )
+                      )
+
+                      mgr.updateAppWidget(id, rv)
+                      mgr.notifyAppWidgetViewDataChanged(id, R.id.grid)
+                  }
+              }
+
+              override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
+                  for (id in ids) render(ctx, mgr, id)
+                  work(ctx, "refresh", null)
+              }
+
+              override fun onReceive(ctx: Context, intent: Intent) {
+                  when (intent.action) {
+                      ACTION_CMD -> work(ctx, intent.getStringExtra("a") ?: "refresh", null)
+                      ACTION_PLAY -> {
+                          val id = intent.getStringExtra("cardId")
+                          if (id != null) work(ctx, "play", id)
+                      }
+                      else -> super.onReceive(ctx, intent)
+                  }
+              }
+
+              private fun work(ctx: Context, a: String, arg: String?) {
+                  val pr = goAsync()
+                  val app = ctx.applicationContext
+                  Thread {
+                      try {
+                          val msg = Player.perform(app, a, arg)
+                          if (msg.isNotEmpty()) toast(app, msg)
+                      } finally {
+                          pr.finish()
+                      }
+                  }.start()
+              }
+          }
+
+          class CoversService : RemoteViewsService() {
+              override fun onGetViewFactory(intent: Intent): RemoteViewsFactory = CoversFactory(applicationContext)
+          }
+
+          class CoversFactory(private val ctx: Context) : RemoteViewsService.RemoteViewsFactory {
+              private var items: List<Card> = emptyList()
+
+              override fun onCreate() {}
+
+              override fun onDataSetChanged() {
+                  items = Library.load(ctx).take(80)
+                  for (c in items) Covers.ensure(ctx, c)
+              }
+
+              override fun onDestroy() {}
+
+              override fun getCount(): Int = items.size
+
+              override fun getViewAt(position: Int): RemoteViews {
+                  val rv = RemoteViews(ctx.packageName, R.layout.cover_item)
+                  if (position >= items.size) return rv
+                  val c = items[position]
+                  val f = Covers.file(ctx, c.id)
+                  val bmp = if (f.exists()) BitmapFactory.decodeFile(f.path) else null
+                  if (bmp != null) {
+                      rv.setImageViewBitmap(R.id.cover, bmp)
+                      rv.setViewVisibility(R.id.label, View.GONE)
+                  } else {
+                      rv.setImageViewResource(R.id.cover, R.drawable.cell_bg)
+                      rv.setTextViewText(R.id.label, c.title)
+                      rv.setViewVisibility(R.id.label, View.VISIBLE)
+                  }
+                  rv.setOnClickFillInIntent(R.id.cell, Intent().putExtra("cardId", c.id))
+                  return rv
+              }
+
+              override fun getLoadingView(): RemoteViews? = null
+
+              override fun getViewTypeCount(): Int = 1
+
+              override fun getItemId(position: Int): Long = position.toLong()
+
+              override fun hasStableIds(): Boolean = false
+          }
+          EOF
+
+          cat > $D/SleepActivity.kt <<'EOF'
+          package com.timmytwoplates.yoto
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.widget.Button
+          import android.widget.LinearLayout
+
+          class SleepActivity : Activity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  title = "Sleep timer"
+                  setFinishOnTouchOutside(true)
+                  val root = LinearLayout(this)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.setPadding(24, 24, 24, 24)
+                  val options = listOf(
+                      "15 minutes" to 900,
+                      "30 minutes" to 1800,
+                      "45 minutes" to 2700,
+                      "60 minutes" to 3600,
+                      "Off" to 0
+                  )
+                  val app = applicationContext
+                  for (o in options) {
+                      val b = Button(this)
+                      b.text = o.first
+                      b.setOnClickListener {
+                          Thread {
+                              val m = Player.perform(app, "sleep", o.second.toString())
+                              if (m.isNotEmpty()) toast(app, m)
+                          }.start()
+                          finish()
+                      }
+                      root.addView(b)
+                  }
+                  setContentView(root)
+              }
+          }
+          EOF
+
+          cat > $D/MainActivity.kt <<'EOF'
+          package com.timmytwoplates.yoto
+
+          import android.app.Activity
+          import android.app.AlertDialog
+          import android.content.Intent
+          import android.graphics.Typeface
+          import android.net.Uri
+          import android.os.Bundle
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.ScrollView
+          import android.widget.TextView
+          import android.widget.Toast
+          import java.net.InetAddress
+          import java.net.ServerSocket
+
+          class MainActivity : Activity() {
+              private lateinit var status: TextView
+              private lateinit var logView: TextView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val root = LinearLayout(this)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.setPadding(32, 32, 32, 32)
+
+                  status = TextView(this)
+                  status.textSize = 16f
+                  root.addView(status)
+
+                  fun btn(label: String, f: () -> Unit) {
+                      val b = Button(this)
+                      b.text = label
+                      b.setOnClickListener { f() }
+                      root.addView(b)
+                  }
+                  btn("Sign in with Yoto") { signIn() }
+                  btn("Choose player") { choosePlayer() }
+                  btn("Refresh cards") {
+                      bg("Refreshing cards...") {
+                          YotoApi.library(this)
+                          YotoWidget.refreshAll(this)
+                          ""
+                      }
+                  }
+                  btn("Refresh player now") {
+                      bg("Contacting player...") { Player.perform(this, "refresh", null) }
+                  }
+
+                  logView = TextView(this)
+                  logView.textSize = 11f
+                  logView.typeface = Typeface.MONOSPACE
+                  logView.setPadding(0, 24, 0, 0)
+                  root.addView(logView)
+
+                  val sv = ScrollView(this)
+                  sv.addView(root)
+                  setContentView(sv)
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  refresh()
+              }
+
+              private fun refresh() {
+                  val signed = Auth.signedIn(this)
+                  val n = Library.load(this).size
+                  val err = Store.str(this, "lastErr")
+                  status.text = "Signed in: " + (if (signed) "yes" else "no") +
+                      "\nPlayer: " + (Store.str(this, "deviceName") ?: "none") +
+                      "\nCards loaded: " + n +
+                      (if (err != null) "\nLast error: " + err else "")
+                  logView.text = Store.str(this, "log") ?: ""
+              }
+
+              private fun bg(msg: String, work: () -> String) {
+                  status.text = msg
+                  Thread {
+                      val r = try {
+                          work()
+                      } catch (e: Exception) {
+                          "Error: " + e.message
+                      }
+                      runOnUiThread {
+                          refresh()
+                          if (r.isNotEmpty()) Toast.makeText(this, r, Toast.LENGTH_LONG).show()
+                      }
+                  }.start()
+              }
+
+              private fun choosePlayer() {
+                  Thread {
+                      val d = YotoApi.devices(this)
+                      runOnUiThread {
+                          if (d.isEmpty()) {
+                              Toast.makeText(this, "No players found (are you signed in?)", Toast.LENGTH_LONG).show()
+                          } else {
+                              AlertDialog.Builder(this)
+                                  .setTitle("Choose player")
+                                  .setItems(d.map { it.second }.toTypedArray()) { _, i ->
+                                      Store.put(this, "deviceId", d[i].first)
+                                      Store.put(this, "deviceName", d[i].second)
+                                      refresh()
+                                  }
+                                  .show()
+                          }
+                      }
+                  }.start()
+              }
+
+              private fun signIn() {
+                  val verifier = Auth.newVerifier()
+                  val state = Auth.newVerifier().take(16)
+                  try {
+                      Auth.listener?.close()
+                  } catch (e: Exception) {
+                  }
+                  val server = try {
+                      ServerSocket(8787, 1, InetAddress.getByName("127.0.0.1"))
+                  } catch (e: Exception) {
+                      Toast.makeText(this, "Can't listen on port 8787: " + e.message, Toast.LENGTH_LONG).show()
+                      return
+                  }
+                  Auth.listener = server
+                  Thread {
+                      try {
+                          server.soTimeout = 180000
+                          val sock = server.accept()
+                          val line = sock.getInputStream().bufferedReader().readLine() ?: ""
+                          val path = line.split(" ").getOrNull(1) ?: ""
+                          val uri = Uri.parse("http://127.0.0.1" + path)
+                          val code = uri.getQueryParameter("code")
+                          val st = uri.getQueryParameter("state")
+                          val oauthErr = uri.getQueryParameter("error_description") ?: uri.getQueryParameter("error")
+                          val ok = code != null && st == state
+                          val headline = if (ok) "Signed in" else "Sign-in failed"
+                          val html = "<html><body style='font-family:sans-serif;text-align:center;margin-top:20vh'>" +
+                              "<h2>" + headline + "</h2><p>Return to Yoto Remote.</p></body></html>"
+                          val bytes = html.toByteArray()
+                          val out = sock.getOutputStream()
+                          out.write(
+                              ("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n" +
+                                  "Connection: close\r\nContent-Length: " + bytes.size + "\r\n\r\n").toByteArray()
+                          )
+                          out.write(bytes)
+                          out.flush()
+                          sock.close()
+                          server.close()
+                          if (!ok || code == null) {
+                              Store.log(this, "Sign-in failed: " + (oauthErr ?: "state mismatch"))
+                          } else {
+                              val e = Auth.exchange(this, code, verifier)
+                              Store.log(this, e ?: "Signed in")
+                              if (e == null) {
+                                  if (Store.str(this, "deviceId") == null) {
+                                      val d = YotoApi.devices(this).firstOrNull()
+                                      if (d != null) {
+                                          Store.put(this, "deviceId", d.first)
+                                          Store.put(this, "deviceName", d.second)
+                                      }
+                                  }
+                                  YotoApi.library(this)
+                                  YotoWidget.refreshAll(this)
+                              }
+                          }
+                      } catch (e: Exception) {
+                          Store.log(this, "Sign-in: " + e.message)
+                      } finally {
+                          try {
+                              server.close()
+                          } catch (e: Exception) {
+                          }
+                      }
+                      runOnUiThread { refresh() }
+                  }.start()
+                  startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Auth.authUrl(Auth.challenge(verifier), state))))
+              }
+          }
+          EOF
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Name the APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk YotoRemote-${{ github.run_number }}.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Yoto Remote build ${{ github.run_number }}
+          files: YotoRemote-${{ github.run_number }}.apk
